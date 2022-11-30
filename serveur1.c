@@ -226,6 +226,10 @@ int main (int argc, char *argv[]) {
         }
 
         //Attente réception ACK
+                //Ajouter le suivis des ack reçu (pas reçu à la même intervalle de temps: ack4 avant ack3)
+                //comment renvoyer des données déjà envoyé ?
+                //comment gérer le timer sans bloquer ?
+                
         timeout.tv_sec=1;
         timeout.tv_usec=0;
 
