@@ -182,6 +182,12 @@ int main (int argc, char *argv[]) {
     segment =(char*)malloc(SEG_SIZE);
 
         //Paramètre de gestion
+    //se mettre en attente non bloquante: select
+    fd_set set;
+    struct timeval timeout;
+    FD_ZERO(&set);
+    FD_SET(serveur_cli1, &set);
+
     //init timer
     clock_t start, end;
 
@@ -220,17 +226,26 @@ int main (int argc, char *argv[]) {
         }
 
         //Attente réception ACK
-        int size = recvfrom (serveur_cli1, (char*)buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&add_cli, &size_cli);
-        if (strncmp(buffer,"ACK",3)==0){
-            int num_ack = ack(buffer);
-            printf("%s\n",buffer);
-            //printf("%d\n",num_ack);
-            end = clock();
-            if(sequence == num_ack){
-                cwnd +=1;
-            }
-        }
+        timeout.tv_sec=1;
+        timeout.tv_usec=0;
 
+        int recv = select(serveur_cli1+1, &set, NULL,NULL,&timeout);
+        if(recv==-1){
+            perror("select()");
+        }else if(FD_ISSET(serveur_cli1,&set)){
+            int size = recvfrom (serveur_cli1, (char*)buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&add_cli, &size_cli);
+            if (strncmp(buffer,"ACK",3)==0){
+                int num_ack = ack(buffer);
+                printf("%s\n",buffer);
+                //printf("%d\n",num_ack);
+                end = clock();
+                if(sequence == num_ack){
+                    cwnd +=1;
+                }
+            }
+        } else {
+            printf("timer expiré\n");
+        }
         clock_t rtt = RTT(start,end);
 
     }
@@ -246,4 +261,3 @@ int main (int argc, char *argv[]) {
     close(serveur);
     return 0;
 }
-
