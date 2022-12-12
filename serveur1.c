@@ -16,35 +16,30 @@ int genPort (int port) {
     while (newPort == port){
         newPort = 1000 + (rand()%8999);
     }
-    printf("Nouveau Port pour le client1: %d \n",newPort);
     return newPort;
 }
 
 char* genSeq (int sequence){
     char* seq;
-    //free(seq);
     seq = malloc(sizeof(char));
     char val[6];
     sprintf(val,"%d",sequence);
-    //printf("%d\n",sequence);
     int j = strlen(val)-1;
     for(int i=5; i> 5-strlen(val);i--){
         seq[i]= val[j];
         j--;
     }
-    //printf("Done\n");
     for(int i=5-strlen(val);i>=0;i--){
         seq[i] = '0';
     }
-    //printf("Done 2\n");
 
     return seq;
 }
-
+/*
 clock_t RTT(clock_t start,clock_t end){
     clock_t diff = end - start;
     return diff;
-}
+}*/
 
 int ack (char* buf){
     char* num = NULL;
@@ -55,213 +50,202 @@ int ack (char* buf){
         j++;
     }
 
-    //printf("Avant conversion: %s\n",num);
     return atoi(num);
 }
 
-int main (int argc, char *argv[]) {
-
-    if(!(argc == 2)){
-        perror("erreur parametre d'entree: ./serveur1 NumeroPort\n");
-        return -1;
-    }
-
-    //initialisation variables UDP
-    struct sockaddr_in add, add_cli;
-    int port= atoi(argv[1]);
-    int valid= 1;
-    memset((char*)&add,0,sizeof(add));
-    memset((char*)&add_cli,0,sizeof(add_cli));
-
-    int size_cli = sizeof(add_cli);
+struct Socket {
+    int socket;
+    int port;
+    struct sockaddr_in clientAddress;
+    socklen_t clientSize;
+    struct sockaddr_in address;
     char buffer[RCVSIZE];
+    int valid;
+};
 
-    //creation socket
-    int serveur = socket(AF_INET,SOCK_DGRAM,0);
-    if(serveur<0){return -1;} else {printf("descripteur serveur: %d\n",serveur);}
+struct Socket generateSocket(char* argPort) {
 
-    setsockopt(serveur, SOL_SOCKET, SO_REUSEADDR, &valid, sizeof(int));
+    struct sockaddr_in address, clientAddress;
+    int port = atoi(argPort);
+    int valid = 1;
+    memset((char*)&address,0,sizeof(address));
+    memset((char*)&clientAddress,0,sizeof(clientAddress));
 
-    add.sin_family= AF_INET;
-    add.sin_port= htons(port);
-    add.sin_addr.s_addr= htonl(INADDR_ANY);
+    int clientSize = sizeof(clientAddress);
 
-    //init serveur
-    if (bind(serveur, (struct sockaddr*) &add, sizeof(add)) == -1) {
+    int socketLink = socket(AF_INET,SOCK_DGRAM,0);
+    if (socketLink < 0) exit(-1);
+
+    setsockopt(socketLink, SOL_SOCKET, SO_REUSEADDR, &valid, sizeof(int));
+
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(socketLink, (struct sockaddr*) &address, sizeof(address)) == -1) {
         perror("Bind failed\n");
-        close(serveur);
-        return -1;
+        close(socketLink);
+        exit(-1);
     }
 
-    //Reception
-   // printf("Attente message du client\n");
-    int size_mes = recvfrom (serveur, (char*)buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&add_cli, &size_cli);
-    if(size_mes<0){
-        printf("don't receive\n");
-        return 0;
-    }
-    buffer[size_mes]= '\0';
-    //printf("taille: %d\n", size_mes);
-    printf("Client: %s\n",buffer);
-    int portClient;
-    //Ouverture connection avec le client et envoi du nouveau port
-    if (strcmp(buffer,"SYN")==0){
-        printf("Generation du nouveau port\n");
-        portClient = genPort(port);
+    struct Socket newSocket;
 
-        //creation message
-        char portACK[20] = "SYN-ACK";
-        char newPort[5];
-        sprintf(newPort,"%d",portClient);
-        //printf("%s\n", newPort);
-        strcat(portACK,newPort);
-        printf("%s \n", portACK);
+    newSocket.socket = socketLink;
+    newSocket.port = port;
+    newSocket.clientAddress = clientAddress;
+    newSocket.clientSize = clientSize;
+    newSocket.address = address;
+    newSocket.valid = valid;
 
-        //envoie du message
-        if(sendto(serveur,portACK, strlen(portACK),MSG_CONFIRM,(const struct sockaddr *)&add_cli, sizeof(add_cli)) < 0){
-            printf("fail\n");
-        }else{
-            printf("message send\n");
-        }
+    return newSocket;
+}
 
-    }
-
-    //Attente de la réception ACK
-    size_mes = recvfrom (serveur, (char*)buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&add_cli, &size_cli);
-    if(size_mes<0){
-        printf("don't receive\n");
-        return 0;
-    }
-    buffer[size_mes]= '\0';
-    printf("%s\n",buffer);
-
-    //Création d'une nouvelle socket pour le client
-    struct sockaddr_in cli;
-    memset((char*)&cli,0,sizeof(cli));
-    int serveur_cli1 = socket(AF_INET,SOCK_DGRAM,0);
-    if(serveur_cli1<0){return -1;} else {printf("descripteur nouvelle socket: %d\n",serveur_cli1);}
-    setsockopt(serveur_cli1, SOL_SOCKET, SO_REUSEADDR, &valid, sizeof(int));
-    cli.sin_family= AF_INET;
-    cli.sin_port= htons(portClient);
-    cli.sin_addr.s_addr= htonl(INADDR_ANY);
-    if (bind(serveur_cli1, (struct sockaddr*) &cli, sizeof(cli)) == -1) {
-        perror("Bind failed\n");
-        close(serveur_cli1);
-        return -1;
-    }
-
-    //Réception nom du fichier
-    int size= recvfrom (serveur_cli1, (char*)buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&add_cli, &size_cli);
-    if(size_mes<0){
-        printf("don't receive\n");
-        return 0;
-    }
-    buffer[size]= '\0';
-    printf("Client: %s\n",buffer);
-
-    //Traitement avec le client: envoi du fichier demandé
-
-        //ouverture fichier souce
-    char* nom_fichier = buffer;
-    FILE* fichier_src;
-    if(!(fichier_src = fopen(nom_fichier,"r"))){
-        printf("Erreur ouverture du fichier <%s> \n",nom_fichier);
-        return EXIT_FAILURE;
-    }
-    printf("ouverture fichier\n");
-
-        //init num séquence
-    int sequence = 0;
-    char* seq = genSeq(sequence);
-
-        //Fragmentation du document
-    char* segment= NULL;
-    char* fragment = NULL;
-    int i = 0;
-    fragment =(char*)malloc(SEG_SIZE);
-    segment =(char*)malloc(SEG_SIZE);
-
-        //Paramètre de gestion
+int sendFragment (struct Socket socket, struct Socket transfertSocket, int sequence, int rsize, char* fragment){
     //se mettre en attente non bloquante: select
     fd_set set;
     struct timeval timeout;
     FD_ZERO(&set);
-    FD_SET(serveur_cli1, &set);
+    FD_SET(transfertSocket.socket, &set);
 
-    //init timer
-    clock_t start, end;
+    timeout.tv_sec=1;
+    timeout.tv_usec=0;
 
-    //init Slow Start
-    int cwnd = 1;
-
-    //while(!(feof(fichier_src))){
-    for (int a=0; a<50; a++){
-
-        //char slow [cwnd][SEG_SIZE] = {""};
-        printf("\n");
-        for(int j=0;j<cwnd;j++){
-            if (!(feof(fichier_src))){
-
-                sequence++;
-                i++;
-                seq = genSeq(sequence);
-                printf("Sequence: %s\n", seq);
-
-                fread(segment,1,SEG_SIZE,fichier_src);
-                printf ("%d : %s \n",i,segment);
-
-                //Création du message
-                fragment = seq;
-                strcat(fragment,segment);
-                printf("%s \n", fragment);
-
-                //Envoi du segment
-                if(sendto(serveur_cli1,fragment, strlen(fragment),MSG_CONFIRM,(const struct sockaddr *)&add_cli, sizeof(add_cli)) < 0){
-                    printf("fail\n");
-                }else{
-                    printf("message send\n");
-                    start = clock();
-                }
-            }
-        }
-
-        //Attente réception ACK
-                //Ajouter le suivis des ack reçu (pas reçu à la même intervalle de temps: ack4 avant ack3)
-                //comment renvoyer des données déjà envoyé ?
-                //comment gérer le timer sans bloquer ?
-                
-        timeout.tv_sec=1;
-        timeout.tv_usec=0;
-
-        int recv = select(serveur_cli1+1, &set, NULL,NULL,&timeout);
-        if(recv==-1){
-            perror("select()");
-        }else if(FD_ISSET(serveur_cli1,&set)){
-            int size = recvfrom (serveur_cli1, (char*)buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&add_cli, &size_cli);
-            if (strncmp(buffer,"ACK",3)==0){
-                int num_ack = ack(buffer);
-                printf("%s\n",buffer);
-                //printf("%d\n",num_ack);
-                end = clock();
-                if(sequence == num_ack){
-                    cwnd +=1;
-                }
-            }
-        } else {
-            printf("timer expiré\n");
-        }
-        clock_t rtt = RTT(start,end);
-
+    if(sendto(transfertSocket.socket,fragment, rsize,0,(const struct sockaddr *)&socket.clientAddress, sizeof(socket.clientAddress)) < 0){
+        printf("Error sending fragment, resending\n");
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+    }else{
+        printf ("%s \n",fragment);
+        //start = clock();
     }
+
+    //Attente ACK
+    int somethingToRead = select(transfertSocket.socket+1, &set, NULL,NULL,&timeout);
+    if(somethingToRead==-1){
+        printf("No feedbacks received, resending fragment\n");
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+    }else if(FD_ISSET(transfertSocket.socket,&set)){
+        int size = recvfrom (transfertSocket.socket, (char*)socket.buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&socket.clientAddress, &socket.clientSize);
+        if (strncmp(socket.buffer,"ACK",3)==0){
+            int num_ack = ack(socket.buffer);
+            printf("\nReceived ACK -> %s\n",socket.buffer);
+            //end = clock();
+            if(!(sequence == num_ack)){
+                printf("Seq do not match, resending\n");
+                sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+            }
+        }
+    } else {
+        printf("Ended timer\n");
+        //Renvoi du segment
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+    }
+    return 0;
+}
+
+int sendFile(struct Socket socket, struct Socket transfertSocket) {
+    char* nom_fichier = socket.buffer;
+    FILE* fichier_src;
+    if(!(fichier_src = fopen(nom_fichier,"r"))){
+        printf("Error opening file <%s> \n",nom_fichier);
+        return EXIT_FAILURE;
+    }
+    printf("Starting fragmenting file %s\n", nom_fichier);
+
+    int sequence = 0;
+    char* segment= NULL;
+    char* fragment = NULL;
+    fragment =(char*)malloc(SEG_SIZE);
+    segment =(char*)malloc(SEG_SIZE);
+
+    clock_t start, end;    
+
+    while (!(feof(fichier_src))){
+    //for (int a=0; a<300; a++){          //test
+        sequence++;         
+        char* seq = genSeq(sequence);
+
+        printf("\nSeq %s\n", seq);
+
+        int rr= fread(segment,1,SEG_SIZE,fichier_src);
+        printf("rr value %d\n", rr);
+
+        fragment = seq;
+        memcpy(fragment+6, segment, rr);
+        sendFragment(socket, transfertSocket, sequence, rr+6, fragment);
+        
+    }
+
     fclose(fichier_src);
 
-
-        //Demande la fermeture du client
-    if(sendto(serveur_cli1,"FIN", strlen("FIN"),MSG_CONFIRM,(const struct sockaddr *)&add_cli, sizeof(add_cli)) < 0){
-        printf("fail\n");
+    if(sendto(transfertSocket.socket,"FIN", strlen("FIN"),0,(const struct sockaddr *)&socket.clientAddress, sizeof(socket.clientAddress)) < 0){
+        printf("Couldnt send last message in file socket\n");
     }
 
+    return 0;
+}
+
+
+int main (int argc, char *argv[]) {
+
+    if(!(argc == 2)){
+        perror("Missing port as first argument\n");
+        return -1;
+    }
+
+    struct Socket serverSocket = generateSocket(argv[1]);
+    printf("Server started, listening on port %s\nAwaiting client connection\n",argv[1]);
     
-    close(serveur);
+    int messageSize = recvfrom(serverSocket.socket, (char *) &serverSocket.buffer, RCVSIZE, MSG_WAITALL, (struct sockaddr*)&serverSocket.clientAddress, &serverSocket.clientSize);
+    if (messageSize == -1) {
+        printf("Received empty message on server socket\n");
+        return 0;
+    } else {
+        printf("Succesfully received msg of length %i\n", messageSize);
+    }
+
+    serverSocket.buffer[messageSize]= '\0';
+
+    int generatedPort = genPort(serverSocket.port);
+    char portChar[5];
+    sprintf(portChar, "%d", generatedPort);
+
+    if(strcmp(serverSocket.buffer,"SYN") == 0) {
+        printf("File socket port will be %i\n", generatedPort);
+
+        char ACKMessage[20] = "SYN-ACK";
+        strcat(ACKMessage, portChar);
+        printf("Sending ACK with port to client: %s \n", ACKMessage);
+
+        if(sendto(serverSocket.socket,ACKMessage, strlen(ACKMessage),0,(const struct sockaddr *)&serverSocket.clientAddress, sizeof(serverSocket.clientAddress)) < 0){
+            printf("Couldnt send ACK\n");
+        }
+
+    }
+
+    messageSize = recvfrom (serverSocket.socket, (char*)serverSocket.buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&serverSocket.clientAddress, &serverSocket.clientSize);
+    if (messageSize < 0) {
+        printf("Received empty message on server socket\n");
+        return 0;
+    } else {
+        printf("Succesfully received msg of length %i\n", messageSize);
+    }
+
+    serverSocket.buffer[messageSize]= '\0';
+
+    if(strcmp(serverSocket.buffer,"ACK") == 0) {
+        struct Socket fileTransfertSocket = generateSocket(portChar);
+
+        messageSize = recvfrom (fileTransfertSocket.socket, (char*)serverSocket.buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&serverSocket.clientAddress, &serverSocket.clientSize);
+        if(messageSize < 0){
+            printf("Received empty message on file socket\n");
+            return 0;
+        } else printf("Succesfully received msg of length %i\n", messageSize);
+
+        serverSocket.buffer[messageSize]= '\0';
+
+        sendFile(serverSocket,fileTransfertSocket);
+    }
+    
+    close(serverSocket.socket);
     return 0;
 }
