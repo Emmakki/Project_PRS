@@ -6,7 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/select.h>
-#include <sys/time.h>
+#include <time.h>
 
 #define RCVSIZE 1024
 #define SEG_SIZE 6
@@ -35,11 +35,34 @@ char* genSeq (int sequence){
 
     return seq;
 }
-/*
-clock_t RTT(clock_t start,clock_t end){
-    clock_t diff = end - start;
-    return diff;
-}*/
+
+int RTT(clock_t start,clock_t end){
+    double rtt = ((double)(end - start))/CLOCKS_PER_SEC;
+    FILE* fichier_rtt;
+    if(!(fichier_rtt = fopen("rtt.log","a"))){
+        printf("Error opening file rtt.log \n");
+        return EXIT_FAILURE;
+    }
+    fprintf(fichier_rtt, "%lf %lf\n",((double)clock())/CLOCKS_PER_SEC,rtt);
+    fclose(fichier_rtt);
+    return 0;
+}
+
+int execTime(clock_t start,clock_t end){
+    double diff = ((double)(end - start))/CLOCKS_PER_SEC;
+    //Ecriture dans un fichier de suivi
+    FILE* fichier_time;
+    if(!(fichier_time = fopen("execution.log","a"))){
+        printf("Error opening file execution.log \n");
+        return EXIT_FAILURE;
+    }
+
+    fprintf(fichier_time,"\nNouvelle execution\n");
+    fprintf(fichier_time, "%lf",diff);
+    fclose(fichier_time);
+
+    return 0;
+}
 
 int ack (char* buf){
     char* num = NULL;
@@ -100,7 +123,7 @@ struct Socket generateSocket(char* argPort) {
     return newSocket;
 }
 
-int sendFragment (struct Socket socket, struct Socket transfertSocket, int sequence, int rsize, char* fragment){
+int sendFragment (struct Socket socket, struct Socket transfertSocket, int sequence, int rsize, char* fragment, clock_t start,clock_t end){
     //se mettre en attente non bloquante: select
     fd_set set;
     struct timeval timeout;
@@ -112,32 +135,34 @@ int sendFragment (struct Socket socket, struct Socket transfertSocket, int seque
 
     if(sendto(transfertSocket.socket,fragment, rsize,0,(const struct sockaddr *)&socket.clientAddress, sizeof(socket.clientAddress)) < 0){
         printf("Error sending fragment, resending\n");
-        sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
     }else{
         printf ("%s \n",fragment);
-        //start = clock();
+        start = clock();
     }
 
     //Attente ACK
     int somethingToRead = select(transfertSocket.socket+1, &set, NULL,NULL,&timeout);
     if(somethingToRead==-1){
         printf("No feedbacks received, resending fragment\n");
-        sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
     }else if(FD_ISSET(transfertSocket.socket,&set)){
         int size = recvfrom (transfertSocket.socket, (char*)socket.buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&socket.clientAddress, &socket.clientSize);
         if (strncmp(socket.buffer,"ACK",3)==0){
             int num_ack = ack(socket.buffer);
             printf("\nReceived ACK -> %s\n",socket.buffer);
-            //end = clock();
-            if(!(sequence == num_ack)){
+            if(sequence == num_ack){
+                end = clock();
+                RTT(start, end);
+            } else {
                 printf("Seq do not match, resending\n");
-                sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+                sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
             }
         }
     } else {
         printf("Ended timer\n");
         //Renvoi du segment
-        sendFragment (socket, transfertSocket,sequence, rsize, fragment);
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
     }
     return 0;
 }
@@ -157,7 +182,7 @@ int sendFile(struct Socket socket, struct Socket transfertSocket) {
     fragment =(char*)malloc(SEG_SIZE);
     segment =(char*)malloc(SEG_SIZE);
 
-    clock_t start, end;    
+    clock_t start, end;
 
     while (!(feof(fichier_src))){
     //for (int a=0; a<300; a++){          //test
@@ -171,7 +196,7 @@ int sendFile(struct Socket socket, struct Socket transfertSocket) {
 
         fragment = seq;
         memcpy(fragment+6, segment, rr);
-        sendFragment(socket, transfertSocket, sequence, rr+6, fragment);
+        sendFragment(socket, transfertSocket, sequence, rr+6, fragment, start, end);
         
     }
 
@@ -186,6 +211,8 @@ int sendFile(struct Socket socket, struct Socket transfertSocket) {
 
 
 int main (int argc, char *argv[]) {
+    //Temps d'execution
+    clock_t execStart, execEnd; 
 
     if(!(argc == 2)){
         perror("Missing port as first argument\n");
@@ -233,6 +260,7 @@ int main (int argc, char *argv[]) {
     serverSocket.buffer[messageSize]= '\0';
 
     if(strcmp(serverSocket.buffer,"ACK") == 0) {
+        execStart = clock();
         struct Socket fileTransfertSocket = generateSocket(portChar);
 
         messageSize = recvfrom (fileTransfertSocket.socket, (char*)serverSocket.buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&serverSocket.clientAddress, &serverSocket.clientSize);
@@ -244,7 +272,10 @@ int main (int argc, char *argv[]) {
         serverSocket.buffer[messageSize]= '\0';
 
         sendFile(serverSocket,fileTransfertSocket);
+
     }
+    execEnd = clock();
+    execTime(execStart,execEnd);
     
     close(serverSocket.socket);
     return 0;
