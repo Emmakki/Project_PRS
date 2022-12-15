@@ -20,22 +20,22 @@ int genPort (int port) {
 }
 
 char* genSeq (int sequence){
-    char* seq;
-    seq = malloc(sizeof(char));
+    char* seg;
+    seg = malloc(sizeof(char));
     char val[6];
     sprintf(val,"%d",sequence);
     int j = strlen(val)-1;
     for(int i=5; i> 5-strlen(val);i--){
-        seq[i]= val[j];
+        seg[i]= val[j];
         j--;
     }
     for(int i=5-strlen(val);i>=0;i--){
-        seq[i] = '0';
+        seg[i] = '0';
     }
-
-    return seq;
+    return seg;
+    free(seg);
 }
-
+/*
 int RTT(clock_t start,clock_t end){
     double rtt = ((double)(end - start))/CLOCKS_PER_SEC;
     FILE* fichier_rtt;
@@ -46,9 +46,9 @@ int RTT(clock_t start,clock_t end){
     fprintf(fichier_rtt, "%lf %lf\n",((double)clock())/CLOCKS_PER_SEC,rtt);
     fclose(fichier_rtt);
     return 0;
-}
+}*/
 
-int execTime(clock_t start,clock_t end){
+int execTime(clock_t start,clock_t end, int data){
     double diff = ((double)(end - start))/CLOCKS_PER_SEC;
     //Ecriture dans un fichier de suivi
     FILE* fichier_time;
@@ -57,10 +57,9 @@ int execTime(clock_t start,clock_t end){
         return EXIT_FAILURE;
     }
 
-    fprintf(fichier_time,"\nNouvelle execution\n");
-    fprintf(fichier_time, "%lf",diff);
+    fprintf(fichier_time,"\nNouvelle execution: fragment de %d octets\n", SEG_SIZE);
+    fprintf(fichier_time, "%lf s -> débit: %lf o/s",diff,data/diff);
     fclose(fichier_time);
-
     return 0;
 }
 
@@ -74,6 +73,7 @@ int ack (char* buf){
     }
 
     return atoi(num);
+    free(num);
 }
 
 struct Socket {
@@ -122,6 +122,34 @@ struct Socket generateSocket(char* argPort) {
 
     return newSocket;
 }
+/*
+int moniACK(struct Socket socket, struct Socket transfertSocket, int sequence, int rsize, char* fragment, clock_t start,clock_t end){
+    int num_ack = 0;
+    int somethingToRead = select(transfertSocket.socket+1, &set, NULL,NULL,&timeout);
+    if(somethingToRead==-1){
+        printf("No feedbacks received, resending fragment\n");
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
+    }else if(FD_ISSET(transfertSocket.socket,&set)){
+        int size = recvfrom (transfertSocket.socket, (char*)socket.buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&socket.clientAddress, &socket.clientSize);
+        if (strncmp(socket.buffer,"ACK",3)==0){
+            printf("\nReceived ACK -> %s\n",socket.buffer);
+            num_ack = ack(socket.buffer); 
+            printf("Number -> %i\n",num_ack);         
+            if(sequence == num_ack){
+                end = clock();
+                //RTT(start, end);
+            } else {
+                printf("Seq do not match, resending\n");
+                sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
+            }
+        }
+    } else {
+        printf("Ended timer\n");
+        //Renvoi du segment
+        sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
+    }
+    return 0;
+}*/
 
 int sendFragment (struct Socket socket, struct Socket transfertSocket, int sequence, int rsize, char* fragment, clock_t start,clock_t end){
     //se mettre en attente non bloquante: select
@@ -137,11 +165,12 @@ int sendFragment (struct Socket socket, struct Socket transfertSocket, int seque
         printf("Error sending fragment, resending\n");
         sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
     }else{
-        printf ("%s \n",fragment);
+        printf ("Send packet %i: %s \n",sequence, fragment);
         start = clock();
     }
 
     //Attente ACK
+    int num_ack = 0;
     int somethingToRead = select(transfertSocket.socket+1, &set, NULL,NULL,&timeout);
     if(somethingToRead==-1){
         printf("No feedbacks received, resending fragment\n");
@@ -149,11 +178,12 @@ int sendFragment (struct Socket socket, struct Socket transfertSocket, int seque
     }else if(FD_ISSET(transfertSocket.socket,&set)){
         int size = recvfrom (transfertSocket.socket, (char*)socket.buffer,RCVSIZE,MSG_WAITALL,(struct sockaddr *)&socket.clientAddress, &socket.clientSize);
         if (strncmp(socket.buffer,"ACK",3)==0){
-            int num_ack = ack(socket.buffer);
             printf("\nReceived ACK -> %s\n",socket.buffer);
+            num_ack = ack(socket.buffer); 
+            printf("Number -> %i\n",num_ack);         
             if(sequence == num_ack){
                 end = clock();
-                RTT(start, end);
+                //RTT(start, end);
             } else {
                 printf("Seq do not match, resending\n");
                 sendFragment (socket, transfertSocket,sequence, rsize, fragment, start, end);
@@ -176,28 +206,32 @@ int sendFile(struct Socket socket, struct Socket transfertSocket) {
     }
     printf("Starting fragmenting file %s\n", nom_fichier);
 
-    int sequence = 0;
+    int sequence = 1;
     char* segment= NULL;
     char* fragment = NULL;
-    fragment =(char*)malloc(SEG_SIZE);
+    char* seq = NULL;
+    fragment =(char*)malloc(SEG_SIZE+6);
     segment =(char*)malloc(SEG_SIZE);
+    int data;
 
     clock_t start, end;
 
     while (!(feof(fichier_src))){
-    //for (int a=0; a<300; a++){          //test
-        sequence++;         
+    //for (int a=0; a<300; a++){          //test    
         char* seq = genSeq(sequence);
 
         printf("\nSeq %s\n", seq);
 
         int rr= fread(segment,1,SEG_SIZE,fichier_src);
         printf("rr value %d\n", rr);
+        data += rr;
 
         fragment = seq;
         memcpy(fragment+6, segment, rr);
         sendFragment(socket, transfertSocket, sequence, rr+6, fragment, start, end);
-        
+        free(seq);
+        sequence++; 
+
     }
 
     fclose(fichier_src);
@@ -206,13 +240,13 @@ int sendFile(struct Socket socket, struct Socket transfertSocket) {
         printf("Couldnt send last message in file socket\n");
     }
 
-    return 0;
+    return data;
 }
 
 
 int main (int argc, char *argv[]) {
-    //Temps d'execution
-    clock_t execStart, execEnd; 
+    //Temps d'execution et débit
+    clock_t execStart, execEnd;
 
     if(!(argc == 2)){
         perror("Missing port as first argument\n");
@@ -233,7 +267,7 @@ int main (int argc, char *argv[]) {
     serverSocket.buffer[messageSize]= '\0';
 
     int generatedPort = genPort(serverSocket.port);
-    char portChar[5];
+    char portChar[4];
     sprintf(portChar, "%d", generatedPort);
 
     if(strcmp(serverSocket.buffer,"SYN") == 0) {
@@ -271,11 +305,12 @@ int main (int argc, char *argv[]) {
 
         serverSocket.buffer[messageSize]= '\0';
 
-        sendFile(serverSocket,fileTransfertSocket);
+        int fileSize = sendFile(serverSocket,fileTransfertSocket);
+
+        execEnd = clock();
+        execTime(execStart,execEnd, fileSize);
 
     }
-    execEnd = clock();
-    execTime(execStart,execEnd);
     
     close(serverSocket.socket);
     return 0;
